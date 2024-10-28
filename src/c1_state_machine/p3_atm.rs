@@ -2,6 +2,7 @@
 //! The atm may fail to give you cash if it is empty or you haven't swiped your card, or you have
 //! entered the wrong pin.
 
+use std::hash::Hash;
 use super::StateMachine;
 
 /// The keys on the ATM keypad
@@ -58,7 +59,90 @@ impl StateMachine for Atm {
     type Transition = Action;
 
     fn next_state(starting_state: &Self::State, t: &Self::Transition) -> Self::State {
-        todo!("Exercise 4")
+        let cash_inside = starting_state.cash_inside;
+
+        let current_state = || {
+            starting_state.clone()
+        };
+        let waiting_state = || {
+            Atm {
+                cash_inside,
+                expected_pin_hash: Auth::Waiting,
+                keystroke_register: Vec::new()
+            }
+        };
+        let authenticating_state = |hash| {
+            Self::State {
+                cash_inside,
+                expected_pin_hash: Auth::Authenticating(hash),
+                keystroke_register: Vec::new()
+            }
+        };
+        let authenticated_state = || {
+            Self::State {
+                cash_inside,
+                expected_pin_hash: Auth::Authenticated,
+                keystroke_register: Vec::new()
+            }
+        };
+        let keystroke_registered_state = |key| {
+            let mut current_state = current_state();
+            current_state.keystroke_register.push(key);
+
+            current_state
+        };
+
+        let Self::State {
+            cash_inside,  
+            expected_pin_hash, 
+            keystroke_register
+        } = starting_state;
+
+        match (expected_pin_hash.clone(), t) {
+            (Auth::Waiting, Self::Transition::SwipeCard(hash)) => authenticating_state(*hash),
+            (Auth::Waiting, _) => waiting_state(),
+
+            (_, Self::Transition::SwipeCard(_)) => current_state(),
+
+            (Auth::Authenticating(hash), Self::Transition::PressKey(Key::Enter)) => {
+                if crate::hash(&starting_state.keystroke_register) == hash {
+                    authenticated_state()
+                } else {
+                    waiting_state()
+                }
+            },
+
+            (Auth::Authenticating(_), Self::Transition::PressKey(key)) => {
+                keystroke_registered_state(key.clone())
+            },
+
+            (Auth::Authenticated, Self::Transition::PressKey(Key::Enter)) => {
+                let amount: u64 = keystroke_register.iter()
+                    .map(|key|
+                        match key {
+                            Key::One => 1,
+                            Key::Two => 2,
+                            Key::Three => 3,
+                            Key::Four => 4,
+                            Key::Enter => panic!("`Enter` in .keystroke_register"),
+                        }
+                    ).fold(0, |acc,next| acc * 10 + next);
+                
+                if amount <= *cash_inside {
+                    Self::State {
+                        cash_inside: cash_inside - amount,
+                        expected_pin_hash: Auth::Waiting,
+                        keystroke_register: Vec::new()
+                    }
+                } else {
+                    waiting_state()
+                }
+            }
+
+            (Auth::Authenticated, Self::Transition::PressKey(key)) => {
+                keystroke_registered_state(key.clone())
+            },
+        }
     }
 }
 
