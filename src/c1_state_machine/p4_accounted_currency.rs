@@ -10,6 +10,7 @@
 
 use super::{StateMachine, User};
 use std::collections::HashMap;
+use std::cmp::Ordering;
 
 /// This state machine models a multi-user currency system. It tracks the balance of each
 /// user and allows users to send funds to one another.
@@ -39,13 +40,52 @@ pub enum AccountingTransaction {
     },
 }
 
+fn deposit(ledger: &mut Balances, account: &User, amount: u64) {
+    ledger.entry(*account)
+          .and_modify(|v| *v += amount )
+          .or_insert(amount);
+}
+
+fn withdraw(ledger: &mut Balances, account: &User, amount: u64) {
+    if let Some(balance) = ledger.get_mut(account) {
+        if *balance > amount {
+            *balance -= amount;
+        } else {
+            ledger.remove(account);
+        }
+    }
+}
+
 /// We model this system as a state machine with three possible transitions
 impl StateMachine for AccountedCurrency {
     type State = Balances;
     type Transition = AccountingTransaction;
 
     fn next_state(starting_state: &Balances, t: &AccountingTransaction) -> Balances {
-        todo!("Exercise 1")
+        let mut cs = starting_state.clone();
+
+        match t {
+            Self::Transition::Mint {minter: _, amount: 0} => (), 
+            Self::Transition::Mint {minter, amount} => { 
+                deposit(&mut cs, minter, *amount)
+            },
+            Self::Transition::Burn {burner, amount} => {
+                withdraw(&mut cs, burner, *amount);
+            },
+            Self::Transition::Transfer {sender, receiver, amount} => {
+                if let Some((_, &sender_balance)) = starting_state.get_key_value(sender) {
+                    match sender_balance.cmp(amount) {
+                        Ordering::Less => (),
+                        Ordering::Equal | Ordering::Greater => {
+                            deposit(&mut cs, receiver, *amount);
+                            withdraw(&mut cs, sender, *amount);
+                        },
+                    };
+                };
+            },
+        }
+
+        cs
     }
 }
 
