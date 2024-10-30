@@ -94,7 +94,62 @@ impl StateMachine for DigitalCashSystem {
     type Transition = CashTransaction;
 
     fn next_state(starting_state: &Self::State, t: &Self::Transition) -> Self::State {
-        todo!("Exercise 1")
+        let mut final_state = starting_state.clone();
+        
+        match t {
+            Self::Transition::Mint {minter, amount} => {
+                final_state.add_bill(
+                    Bill {
+                        serial: final_state.next_serial,
+                        owner: *minter,
+                        amount: *amount,
+                    }
+                );
+            },
+            Self::Transition::Transfer {spends, receives} => {
+                // TODO: Refactor
+                let withdrawed_sum: u64 = spends.iter().map(|b| b.amount).sum();
+                let deposited_sum: Option<u64> = receives.iter().map(|b| b.amount).fold(Some(0), |acc, next| {
+                    match acc {
+                        Some(x) => x.checked_add(next),
+                        None => None
+                    }
+                });           
+
+                let mut ordered_receives = receives.clone();
+                ordered_receives.sort_by(|a, b| a.serial.cmp(&b.serial));
+                let next_serial_number = ordered_receives
+                    .iter()
+                    .fold(Some(final_state.next_serial()), |serial, bill| {
+                        match serial {
+                            Some(s) if s == bill.serial => Some(s + 1),
+                            _ => None,
+                        }
+                    });
+
+                let unique_spends = spends.iter().map(|b| b.serial).collect::<HashSet<u64>>();
+
+                let valid_transfer = 
+                    spends.iter().all(|b| final_state.bills.contains(b)) &&
+                    receives.iter().all(|b| b.amount > 0) &&
+                    deposited_sum.is_some() &&
+                    withdrawed_sum >= deposited_sum.unwrap() &&
+                    next_serial_number.is_some() &&
+                    spends.iter().count() == unique_spends.iter().count();
+                
+                if valid_transfer {
+                    for s in spends {
+                        final_state.bills.remove(s);
+                    };
+                    for r in receives {
+                        final_state.bills.insert(r.clone());
+                        final_state.increment_serial();
+                    };
+                }
+            },
+        }
+
+        final_state
     }
 }
 
