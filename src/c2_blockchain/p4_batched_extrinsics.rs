@@ -179,17 +179,22 @@ impl Block {
     ///
     /// We need to verify the headers as well as execute all transactions and check the final state.
     pub fn verify_sub_chain(&self, chain: &[Block]) -> bool {
+        fn new_block_state_is_valid(previous: &Block, next: &Block) -> bool {
+            next.header.state == previous.header.state + next.body.iter().sum::<u64>()
+        }
+        fn extrinsics_root_is_valid(block: &Block) -> bool {
+            hash(&block.body) == block.header.extrinsics_root
+        }
+
         chain
             .iter()
             .fold(
                 (true, self),
-                |(is_valid, previous_block): (bool, &Block), next_block| {
+                |(sub_chain_valid_so_far, previous_block): (bool, &Block), next_block| {
                     (
-                        is_valid
-                            && next_block.header.state
-                                == previous_block.header.state
-                                    + next_block.body.iter().sum::<u64>()
-                            && hash(&next_block.body) == next_block.header.extrinsics_root
+                        sub_chain_valid_so_far
+                            && new_block_state_is_valid(previous_block, next_block)
+                            && extrinsics_root_is_valid(next_block)
                             && previous_block.header.verify_child(&next_block.header),
                         next_block,
                     )
