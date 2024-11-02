@@ -12,8 +12,9 @@
 //! naming coincidence foreshadows a key abstraction that we will make in a coming chapter.
 
 type Hash = u64;
-use crate::hash;
 use super::p3_consensus::THRESHOLD;
+use crate::hash;
+use rand::random;
 
 /// In this section we will use sum and product together to be our state. While this is only a doubling of state size
 /// remember that in real world blockchains, the state is often really really large.
@@ -21,6 +22,15 @@ use super::p3_consensus::THRESHOLD;
 pub struct State {
     sum: u64,
     product: u64,
+}
+
+impl State {
+    fn apply(&self, extrinsics: &Vec<u64>) -> State {
+        State {
+            sum: self.sum + extrinsics.iter().sum::<u64>(),
+            product: self.product * extrinsics.iter().product::<u64>(),
+        }
+    }
 }
 
 /// The header no longer contains the state directly, but rather, it contains a hash of
@@ -47,7 +57,13 @@ pub struct Header {
 impl Header {
     /// Returns a new valid genesis header.
     fn genesis(genesis_state_root: Hash) -> Self {
-        todo!("Exercise 1")
+        Header {
+            parent: 0,
+            height: 0,
+            extrinsics_root: hash(&Vec::<u64>::new()),
+            state_root: genesis_state_root,
+            consensus_digest: 0,
+        }
     }
 
     /// Create and return a valid child header.
@@ -55,17 +71,54 @@ impl Header {
     /// The state root is passed in similarly to how the complete state
     /// was in the previous section.
     fn child(&self, extrinsics_root: Hash, state_root: Hash) -> Self {
-        todo!("Exercise 2")
+        let mut result = Header {
+            parent: hash(self),
+            height: self.height + 1,
+            extrinsics_root,
+            state_root,
+            consensus_digest: 0,
+        };
+        result.make_hash_below_threshold();
+        result
+    }
+
+    fn make_hash_below_threshold(&mut self) {
+        while hash(self) > THRESHOLD {
+            self.consensus_digest = random();
+        }
     }
 
     /// Verify a single child header.
     fn verify_child(&self, child: &Header) -> bool {
-        todo!("Exercise 3")
+        child.parent == hash(self) && child.height == self.height + 1 && hash(child) < THRESHOLD
     }
 
     /// Verify that all the given headers form a valid chain from this header to the tip.
     fn verify_sub_chain(&self, chain: &[Header]) -> bool {
-        todo!("Exercise 4")
+        self.verify_sub_chain_iter(chain)
+    }
+
+    fn verify_sub_chain_fold(&self, chain: &[Header]) -> bool {
+        chain
+            .iter()
+            .fold((true, self), |(result, current), next| {
+                (result && current.verify_child(next), next)
+            })
+            .0
+    }
+
+    fn verify_sub_chain_iter(&self, chain: &[Header]) -> bool {
+        let mut current = self;
+
+        for next in chain {
+            if !current.verify_child(next) {
+                return false;
+            }
+
+            current = next;
+        }
+
+        true
     }
 }
 
@@ -89,12 +142,22 @@ pub struct Block {
 impl Block {
     /// Returns a new valid genesis block. By convention this block has no extrinsics.
     pub fn genesis(genesis_state: &State) -> Self {
-        todo!("Exercise 5")
+        let genesis_state_hash = hash(genesis_state);
+
+        Block {
+            header: Header::genesis(genesis_state_hash),
+            body: Vec::new(),
+        }
     }
 
     /// Create and return a valid child block.
     pub fn child(&self, pre_state: &State, extrinsics: Vec<u64>) -> Self {
-        todo!("Exercise 6")
+        let state = pre_state.apply(&extrinsics);
+
+        Block {
+            header: self.header.child(hash(&extrinsics), hash(&state)),
+            body: extrinsics,
+        }
     }
 
     /// Verify that all the given blocks form a valid chain from this block to the tip.
@@ -103,7 +166,28 @@ impl Block {
     /// have been given a valid pre-state. And we still need to verify the headers,
     /// execute all transactions, and check the final state.
     pub fn verify_sub_chain(&self, pre_state: &State, chain: &[Block]) -> bool {
-        todo!("Exercise 7")
+        let mut current = self;
+        let mut current_state = pre_state.clone();
+
+        if self.header.state_root != hash(&pre_state.apply(&self.body)) {
+            return false;
+        }
+
+        for next in chain {
+            let next_state = current_state.apply(&next.body);
+
+            if !(current.header.verify_child(&next.header)
+                && next.header.extrinsics_root == hash(&next.body)
+                && next.header.state_root == hash(&next_state))
+            {
+                return false;
+            }
+
+            current_state = next_state;
+            current = next;
+        }
+
+        true
     }
 }
 
@@ -119,7 +203,11 @@ impl Block {
 /// As before, you do not need the entire parent block to do this. You only need the header.
 /// You do, however, now need a pre-state as you have throughout much of this section.
 fn build_invalid_child_block_with_valid_header(parent: &Header, pre_state: &State) -> Block {
-    todo!("Exercise 8")
+    let body: Vec<u64> = vec![7];
+    let state: State = pre_state.apply(&body);
+    let header: Header = parent.child(hash(&body), hash(&state) + 1);
+
+    Block { header, body }
 }
 
 #[test]
