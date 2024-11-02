@@ -9,7 +9,6 @@
 
 use super::p4_batched_extrinsics::{Block, Header};
 use crate::hash;
-use super::p3_consensus::THRESHOLD;
 
 /// Judge which blockchain is "best" when there are multiple candidates. There are several
 /// meaningful notions of "best" which is why this is a trait instead of just a
@@ -167,26 +166,32 @@ fn bc_5_mine_to_custom_difficulty() {
 fn bc_5_heaviest_chain() {
     let g = Header::genesis();
 
+    let custom_threshold = u64::max_value() / 1000;
+
     let mut i = 0;
     let h_a1 = loop {
         let header = g.child(hash(&[i]), i);
         // Extrinsics root hash must be higher than threshold (less work done)
-        if hash(&header) > THRESHOLD {
+        println!("chain1 header hash: {:?}", hash(&header));
+
+        if hash(&header) < custom_threshold {
             break header;
         }
         i += 1;
     };
-    let chain_1 = &[g.clone(), h_a1];
 
+    let chain_1 = &[g.clone(), h_a1];
     let h_b1 = loop {
         let header = g.child(hash(&[i]), i);
         // Extrinsics root hash must be lower than threshold (more work done)
-        if hash(&header) < THRESHOLD {
+        // If it's lower than thresho
+        if hash(&header) < custom_threshold {
             break header;
         }
         i += 1;
     };
     let chain_2 = &[g, h_b1];
+    println!("chain_2 ready");
 
     assert!(HeaviestChainRule::first_chain_is_better(chain_2, chain_1));
 
