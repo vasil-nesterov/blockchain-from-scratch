@@ -1,3 +1,5 @@
+// TODO : run without custom .best_chain implementations
+
 //! Forks in the blockchain represent alternative histories of the system.
 //! When forks arise in the blockchain, users need a way to decide which chain
 //! they will consider best, for now. This is known as a "fork choice rule".
@@ -7,7 +9,15 @@
 //! Since we have nothing to add to the Block or Header data structures in this lesson,
 //! we will import them from the previous lesson.
 
-use super::p4_batched_extrinsics::{Block, Header};
+use core::num;
+use std::u64;
+
+use rand::random;
+
+use super::{
+    p3_consensus::THRESHOLD,
+    p4_batched_extrinsics::{Block, Header},
+};
 use crate::hash;
 
 /// Judge which blockchain is "best" when there are multiple candidates. There are several
@@ -31,7 +41,15 @@ pub trait ForkChoice {
     /// two chains. Therefore this method has a provided implementation. However,
     /// it may be much more performant to write a fork-choice-specific implementation.
     fn best_chain<'a>(candidate_chains: &[&'a [Header]]) -> &'a [Header] {
-        todo!("Exercise 1")
+        let mut best_chain_so_far = candidate_chains[0];
+
+        for i in 1..candidate_chains.len() {
+            if Self::first_chain_is_better(candidate_chains[i], &best_chain_so_far) {
+                best_chain_so_far = candidate_chains[i];
+            }
+        }
+
+        best_chain_so_far
     }
 }
 
@@ -40,14 +58,17 @@ pub struct LongestChainRule;
 
 impl ForkChoice for LongestChainRule {
     fn first_chain_is_better(chain_1: &[Header], chain_2: &[Header]) -> bool {
-        todo!("Exercise 1")
+        chain_1.len() > chain_2.len()
     }
 
     fn best_chain<'a>(candidate_chains: &[&'a [Header]]) -> &'a [Header] {
         // Remember, this method is provided. You _can_ solve the exercise by
         // simply deleting this block. It is up to you to decide whether this fork
         // choice warrants a custom implementation.
-        todo!("Exercise 3")
+        candidate_chains
+            .iter()
+            .max_by(|a, b| a.len().cmp(&b.len()))
+            .expect("candidate_chains to contain at least 1 chain")
     }
 }
 
@@ -66,17 +87,40 @@ pub struct HeaviestChainRule;
 /// usage is that you create a block using the normal `Block.child()` method
 /// and then pass the block to this helper for additional mining.
 fn mine_extra_hard(block: &mut Block, threshold: u64) {
-    todo!("Exercise 4")
+    let header = &mut block.header;
+
+    while hash(header) > threshold {
+        header.consensus_digest = random();
+    }
+}
+
+// Useful for `create_fork_one_side_longer_other_side_heavier' exercise
+fn mine_header_extra_hard(header: &mut Header, threshold: u64) {
+    while hash(header) > threshold {
+        header.consensus_digest = random();
+    }
+}
+
+fn mine_header_not_too_hard(header: &mut Header, threshold: u64) {
+    while hash(header) < threshold {
+        header.consensus_digest = random();
+    }
+}
+
+fn chain_weight(chain: &[Header]) -> u128 {
+    chain.iter().map(|h| hash(h) as u128).sum()
 }
 
 impl ForkChoice for HeaviestChainRule {
     fn first_chain_is_better(chain_1: &[Header], chain_2: &[Header]) -> bool {
-        todo!("Exercise 5")
+        chain_weight(chain_1) < chain_weight(chain_2)
     }
 
     fn best_chain<'a>(candidate_chains: &[&'a [Header]]) -> &'a [Header] {
-        // Remember, this method is provided.
-        todo!("Exercise 6")
+        candidate_chains
+            .iter()
+            .min_by(|a, b| chain_weight(a).cmp(&chain_weight(b)))
+            .expect("candidate_chains to contain at least 1 chain")
     }
 }
 /// The best chain is the one with the most blocks that have even hashes.
@@ -95,14 +139,20 @@ impl ForkChoice for HeaviestChainRule {
 ///    the most PoA blocks, and ties are broken by the most accumulated work.
 pub struct MostBlocksWithEvenHash;
 
+fn number_of_even_blocks(chain: &[Header]) -> u64 {
+    chain.iter().filter(|h| hash(h) % 2 == 0).count() as u64
+}
+
 impl ForkChoice for MostBlocksWithEvenHash {
     fn first_chain_is_better(chain_1: &[Header], chain_2: &[Header]) -> bool {
-        todo!("Exercise 7")
+        number_of_even_blocks(chain_1) > number_of_even_blocks(chain_2)
     }
 
     fn best_chain<'a>(candidate_chains: &[&'a [Header]]) -> &'a [Header] {
-        // Remember, this method is provided.
-        todo!("Exercise 8")
+        candidate_chains
+            .iter()
+            .max_by(|a, b| number_of_even_blocks(a).cmp(&number_of_even_blocks(b)))
+            .expect("candidate_chains to contain at least 1 chain")
     }
 }
 
@@ -129,7 +179,29 @@ impl ForkChoice for MostBlocksWithEvenHash {
 /// 2. The suffix chain which is longer (non-overlapping with the common prefix)
 /// 3. The suffix chain with more work (non-overlapping with the common prefix)
 fn create_fork_one_side_longer_other_side_heavier() -> (Vec<Header>, Vec<Header>, Vec<Header>) {
-    todo!("Exercise 9")
+    let custom_threshold = u64::max_value() / 1_000;
+
+    let g = Header::genesis();
+    let common_1 = g.child(hash(&[1]), 1);
+    let common_2 = common_1.child(hash(&[2]), 2);
+
+    let mut longer_3 = common_2.child(hash(&[3]), 3);
+    mine_header_not_too_hard(&mut longer_3, custom_threshold);
+    let mut longer_4 = longer_3.child(hash(&[4]), 4);
+    mine_header_not_too_hard(&mut longer_4, custom_threshold);
+    let mut longer_5 = longer_4.child(hash(&[5]), 5);
+    mine_header_not_too_hard(&mut longer_5, custom_threshold);
+
+    let mut heavier_3 = common_2.child(hash(&[6]), 6);
+    mine_header_extra_hard(&mut heavier_3, custom_threshold);
+    let mut heavier_4 = heavier_3.child(hash(&[7]), 7);
+    mine_header_extra_hard(&mut heavier_4, custom_threshold);
+
+    (
+        vec![g, common_1, common_2],
+        vec![longer_3, longer_4, longer_5],
+        vec![heavier_3, heavier_4],
+    )
 }
 
 #[test]
@@ -172,15 +244,13 @@ fn bc_5_heaviest_chain() {
     let h_a1 = loop {
         let header = g.child(hash(&[i]), i);
         // Extrinsics root hash must be higher than threshold (less work done)
-        println!("chain1 header hash: {:?}", hash(&header));
-
-        if hash(&header) < custom_threshold {
+        if hash(&header) > custom_threshold {
             break header;
         }
         i += 1;
     };
-
     let chain_1 = &[g.clone(), h_a1];
+
     let h_b1 = loop {
         let header = g.child(hash(&[i]), i);
         // Extrinsics root hash must be lower than threshold (more work done)
@@ -191,7 +261,6 @@ fn bc_5_heaviest_chain() {
         i += 1;
     };
     let chain_2 = &[g, h_b1];
-    println!("chain_2 ready");
 
     assert!(HeaviestChainRule::first_chain_is_better(chain_2, chain_1));
 
